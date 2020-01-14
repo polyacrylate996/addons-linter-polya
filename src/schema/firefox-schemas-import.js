@@ -580,6 +580,7 @@ inner.isBrowserSchema = (_path) => {
 
 export async function fetchSchemas({ inputPath, outputPath }) {
   const openZip = util.promisify(yauzl.open);
+  console.log('AAAAAAAAAAAAA', inputPath);
   const zipfile = await openZip(inputPath);
   const openReadStream = util.promisify(zipfile.openReadStream.bind(zipfile));
 
@@ -591,8 +592,7 @@ export async function fetchSchemas({ inputPath, outputPath }) {
           const readStream = await openReadStream(entry);
           readStream.pipe(fs.createWriteStream(filePath));
         }
-
-        // zipfile.readEntry();
+        zipfile.readEntry();
       })
       .on('error', (error) => {
         reject(error);

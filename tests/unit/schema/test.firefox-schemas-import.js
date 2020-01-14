@@ -3,6 +3,7 @@ import path from 'path';
 import stream from 'stream';
 
 import tar from 'tar';
+import yazl from 'yazl';
 
 import {
   FLAG_PATTERN_REWRITES,
@@ -19,7 +20,6 @@ import {
   rewriteKey,
   rewriteOptionalToRequired,
   rewriteValue,
-  stripTrailingNullByte,
 } from 'schema/firefox-schemas-import';
 
 // Get a reference to unlinkSync so it won't get stubbed later
@@ -1112,22 +1112,38 @@ describe('firefox schema import', () => {
 
   describe('fetchSchemas', () => {
     const outputPath = 'tests/fixtures/schema/imported';
-    const expectedTarballPath = 'tmp/FIREFOX_AURORA_54_BASE.tar.gz';
+    const expectedZipfilePath = 'tmp/FIREFOX_AURORA_54_BASE.zip';
 
     beforeEach(() => {
-      expect(fs.existsSync(expectedTarballPath)).toEqual(false);
+      expect(fs.existsSync(expectedZipfilePath)).toEqual(false);
       createDir(outputPath);
     });
 
     afterEach(() => {
-      expect(fs.existsSync(expectedTarballPath)).toEqual(false);
+      expect(fs.existsSync(expectedZipfilePath)).toEqual(false);
       removeDir(outputPath);
     });
 
     it('extracts the schemas from a local file', async () => {
       const cwd = 'tests/fixtures/schema';
-      const schemaPath = 'firefox';
-      const tarball = tar.create({ cwd, gzip: true }, [schemaPath]);
+      const schemaPath = `${cwd}/firefox`;
+      const zipfile = new yazl.ZipFile();
+
+      const files = [
+        'cookies.json',
+        'manifest.json',
+        'native_host_manifest.json',
+      ];
+
+      files.forEach((file) =>
+        zipfile.addFile(
+          `${schemaPath}/${file}`,
+          path.relative(schemaPath, `${schemaPath}/${file}`)
+        )
+      );
+      zipfile.outputStream.pipe(fs.createWriteStream('mozilla-central.zip'));
+      zipfile.end();
+
       sinon
         .stub(inner, 'isBrowserSchema')
         .withArgs('firefox/cookies.json')
@@ -1136,25 +1152,25 @@ describe('firefox schema import', () => {
         .returns(true);
       sinon
         .stub(fs, 'createReadStream')
-        .withArgs('mozilla-central.tgz')
-        .returns(tarball);
+        .withArgs('mozilla-central.zip')
+        .returns(zipfile);
       sinon
         .stub(fs, 'unlinkSync')
-        .withArgs('mozilla-central.tgz')
+        .withArgs('mozilla-central.zip')
         .returns(undefined);
       expect(fs.readdirSync(outputPath)).toEqual([]);
-      await fetchSchemas({ inputPath: 'mozilla-central.tgz', outputPath });
+      await fetchSchemas({ inputPath: 'mozilla-central.zip', outputPath });
       expect(fs.readdirSync(outputPath)).toEqual(['manifest.json']);
     });
 
-    it('handles errors when parsing the tarball', async () => {
+    it('handles errors when parsing the zipfile', async () => {
       const cwd = 'tests/fixtures/schema';
       const schemaPath = 'firefox';
-      const tarball = tar.create({ cwd, gzip: true }, [schemaPath]);
+      const zipfile = tar.create({ cwd, gzip: true }, [schemaPath]);
       sinon
         .stub(fs, 'createReadStream')
-        .withArgs('mozilla-central.tgz')
-        .returns(tarball);
+        .withArgs('mozilla-central.zip')
+        .returns(zipfile);
       const extractedStream = new stream.Duplex({
         read() {
           this.emit('error', new Error('stream error'));
@@ -1163,7 +1179,7 @@ describe('firefox schema import', () => {
       sinon.stub(tar, 'Parse').returns(extractedStream);
       expect(fs.readdirSync(outputPath)).toEqual([]);
       await expect(
-        fetchSchemas({ inputPath: 'mozilla-central.tgz', outputPath })
+        fetchSchemas({ inputPath: 'mozilla-central.zip', outputPath })
       ).rejects.toThrow();
     });
   });
@@ -1386,28 +1402,6 @@ describe('firefox schema import', () => {
         Object.freeze({ namespace: 'alarms', permissions: ['alarms'] }),
       ]);
       expect(filterSchemas(schemas)).toEqual(schemas);
-    });
-  });
-
-  describe('stripTrailingNullByte', () => {
-    it('strips a trailing null byte if present at the end', () => {
-      const str = 'foo\u0000';
-      expect(stripTrailingNullByte(str)).toEqual('foo');
-    });
-
-    it('returns the string unchanged if not present', () => {
-      const str = 'bar';
-      expect(stripTrailingNullByte(str)).toBe(str);
-    });
-
-    it('returns the string unchanged if not at the end', () => {
-      const str = 'b\u0000az';
-      expect(stripTrailingNullByte(str)).toBe(str);
-    });
-
-    it('handles empty strings', () => {
-      const str = '';
-      expect(stripTrailingNullByte(str)).toBe(str);
     });
   });
 
